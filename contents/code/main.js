@@ -31,10 +31,10 @@ var configSkippedWindows = readConfig("SkipWindows", "lattedock, latte-dock, org
 var alwaysSkippedWindows = systemSkippedWindows.concat(configSkippedWindows)
 
 function shouldSkip(window) {
-    const windowClass = (window.resourceClass.toString() || "").toLowerCase();
 
     // If the window is not a normal window it should be skipped
-    if (window.desktopWindow ||
+    if (!window ||
+        window.desktopWindow ||
         window.dock ||
         window.toolbar ||
         window.menu ||
@@ -56,6 +56,8 @@ function shouldSkip(window) {
         log("Skipped: Special window");
         return true;
     }
+
+    const windowClass = (window.resourceClass.toString() || "").toLowerCase();
 
     // Windows with empty class should be skipped
     if (!windowClass) {
