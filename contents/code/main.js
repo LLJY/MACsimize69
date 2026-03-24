@@ -364,6 +364,29 @@ function sameClassDesktop(window) {
     return false;
 }
 
+function cleanupStaleDesktops() {
+    log("Cleaning up stale virtual desktops from previous session");
+    const mainDesktop = workspace.desktops[0];
+
+    // Move all windows to the main desktop
+    const allWindows = workspace.windowList();
+    for (var i = 0; i < allWindows.length; i++) {
+        var win = allWindows[i];
+        if (!win.desktops.includes(mainDesktop)) {
+            win.desktops = [mainDesktop];
+        }
+    }
+
+    // Remove all desktops except the main one (from the end to avoid index shift)
+    while (workspace.desktops.length > 1) {
+        var last = workspace.desktops[workspace.desktops.length - 1];
+        log(`Removing stale desktop: ${last.name}`);
+        workspace.removeDesktop(last);
+    }
+
+    workspace.currentDesktop = mainDesktop;
+}
+
 function suspendAllMacsimized() {
     log("Suspending all MACsimized windows (multi-screen detected)");
 
@@ -432,6 +455,27 @@ function restoreSuspended() {
     }
 }
 
+function scanAndMacsimize() {
+    log("Scanning windows for fullscreen/maximized state...");
+    var allWindows = workspace.windowList();
+    for (var i = 0; i < allWindows.length; i++) {
+        var win = allWindows[i];
+        if (shouldSkip(win)) continue;
+        installWindowHandlers(win);
+
+        var data = savedData.get(win.internalId);
+        if (data && data.macsimized) continue; // already handled
+
+        if (handleFullscreen && win.fullScreen) {
+            log(`MACsimizing fullscreen window: ${String(win.resourceClass || "")}`);
+            moveToNewDesktop(win);
+        } else if (handleMaximized && win.maximizable && isWindowMaximized(win)) {
+            log(`MACsimizing maximized window: ${String(win.resourceClass || "")}`);
+            moveToNewDesktop(win);
+        }
+    }
+}
+
 function onScreensChanged() {
     if (!enableIfOnlyOne) return;
 
@@ -442,6 +486,9 @@ function onScreensChanged() {
         suspendAllMacsimized();
     } else if (numScreens === 1) {
         restoreSuspended();
+        // Also pick up any fullscreen/maximized windows that were never
+        // MACsimized (e.g. maximized while on multi-screen where it was blocked)
+        scanAndMacsimize();
     }
 }
 
@@ -574,23 +621,12 @@ function install() {
     // Install handler for screen changes (connect/disconnect monitors)
     workspace.screensChanged.connect(onScreensChanged);
 
-    // Scan existing windows for already-maximized/fullscreen state
-    // This handles windows that were maximized before the script loaded (e.g. on Plasma startup)
-    log(`Scanning existing windows...`);
-    var existingWindows = workspace.windowList();
-    for (var i = 0; i < existingWindows.length; i++) {
-        var win = existingWindows[i];
-        if (shouldSkip(win)) continue;
-        installWindowHandlers(win);
-
-        if (handleFullscreen && win.fullScreen) {
-            log(`Found existing fullscreen window: ${win.resourceClass}`);
-            moveToNewDesktop(win);
-        } else if (handleMaximized && win.maximizable && isWindowMaximized(win)) {
-            log(`Found existing maximized window: ${win.resourceClass}`);
-            moveToNewDesktop(win);
-        }
-    }
+    // Clean up stale virtual desktops from a previous session, then re-scan.
+    // This ensures a clean slate: if no fullscreen apps exist, only the main
+    // desktop remains. If fullscreen apps exist, fresh dedicated desktops
+    // are created for them.
+    cleanupStaleDesktops();
+    scanAndMacsimize();
 
     log(`Workspace handler installed`);
 }
